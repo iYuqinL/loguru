@@ -88,9 +88,10 @@ import functools
 import itertools
 import logging
 import re
+import os
 import sys
 import warnings
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 from inspect import isclass, iscoroutinefunction, isgeneratorfunction
 from multiprocessing import current_process, get_context
 from multiprocessing.context import BaseContext
@@ -231,6 +232,9 @@ class Logger:
     def __init__(self, core, exception, depth, record, lazy, colors, raw, capture, patchers, extra):
         self._core = core
         self._options = (exception, depth, record, lazy, colors, raw, capture, patchers, extra)
+
+        self.log_cnt_dict = defaultdict(int)
+        self.is_global_disable = False
 
     def __repr__(self):
         return "<loguru.logger handlers=%r>" % list(self._core.handlers.values())
@@ -1586,7 +1590,8 @@ class Logger:
             else:
                 old_color, old_icon = "", " "
         elif no is not None:
-            raise TypeError("Level '%s' already exists, you can't update its severity no" % name)
+            raise TypeError(
+                "Level '%s' already exists, you can't update its severity no" % name)
         else:
             _, no, old_color, old_icon = self.level(name)
 
@@ -1598,11 +1603,12 @@ class Logger:
 
         if not isinstance(no, int):
             raise TypeError(
-                "Invalid level no, it should be an integer, not: '%s'" % type(no).__name__
-            )
+                "Invalid level no, it should be an integer, not: '%s'" %
+                type(no).__name__)
 
         if no < 0:
-            raise ValueError("Invalid level no, it should be a positive integer, not: %d" % no)
+            raise ValueError(
+                "Invalid level no, it should be a positive integer, not: %d" % no)
 
         ansi = Colorizer.ansify(color)
         level = Level(name, no, color, icon)
@@ -1610,11 +1616,16 @@ class Logger:
         with self._core.lock:
             self._core.levels[name] = level
             self._core.levels_ansi_codes[name] = ansi
-            self._core.levels_lookup[name] = (name, name, no, icon)
             for handler in self._core.handlers.values():
                 handler.update_format(name)
 
         return level
+
+    def global_disable(self):
+        self.is_global_disable = True
+
+    def global_enable(self):
+        self.is_global_disable = False
 
     def disable(self, name):
         """Disable logging of messages coming from ``name`` module and its children.
@@ -1971,7 +1982,9 @@ class Logger:
 
         if exception:
             if isinstance(exception, BaseException):
-                type_, value, traceback = (type(exception), exception, exception.__traceback__)
+                type_, value, traceback = (
+                    type(exception),
+                    exception, exception.__traceback__)
             elif isinstance(exception, tuple):
                 type_, value, traceback = exception
             else:
@@ -2002,6 +2015,17 @@ class Logger:
 
         if capture and kwargs:
             log_record["extra"].update(kwargs)
+
+        interval = kwargs.get("interval", None)
+        if isinstance(interval, int):
+            addi_id = kwargs.get("addi_id", "")
+            log_record_key = (
+                f"{level_id}-{os.path.relpath(file_path).replace('/', '.')}"
+                f":{code.co_name}:{frame.f_lineno}<--{addi_id}")
+            log_cnt = self.log_cnt_dict[log_record_key]
+            self.log_cnt_dict[log_record_key] += 1
+            if (log_cnt % interval) != 0:
+                return
 
         if record:
             if "record" in kwargs:
@@ -2034,39 +2058,73 @@ class Logger:
 
     def trace(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``'TRACE'``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log("TRACE", False, __self._options, __message, args, kwargs)
 
     def debug(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``'DEBUG'``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log("DEBUG", False, __self._options, __message, args, kwargs)
 
     def info(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``'INFO'``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log("INFO", False, __self._options, __message, args, kwargs)
 
     def success(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``'SUCCESS'``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log("SUCCESS", False, __self._options, __message, args, kwargs)
 
     def warning(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``'WARNING'``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log("WARNING", False, __self._options, __message, args, kwargs)
 
     def error(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``'ERROR'``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log("ERROR", False, __self._options, __message, args, kwargs)
 
     def critical(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``'CRITICAL'``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log("CRITICAL", False, __self._options, __message, args, kwargs)
 
     def exception(__self, __message, *args, **kwargs):  # noqa: N805
         r"""Convenience method for logging an ``'ERROR'`` with exception information."""
+        if __self.is_global_disable:
+            return
         options = (True,) + __self._options[1:]
         __self._log("ERROR", False, options, __message, args, kwargs)
 
     def log(__self, __level, __message, *args, **kwargs):  # noqa: N805
         r"""Log ``message.format(*args, **kwargs)`` with severity ``level``."""
+        if __self.is_global_disable:
+            return
+        __message = f"{__message}" + " ".join([f"{arg}" for arg in args])
+        args = []
         __self._log(__level, False, __self._options, __message, args, kwargs)
 
     def start(self, *args, **kwargs):
@@ -2079,8 +2137,8 @@ class Logger:
           confusing name.
         """
         warnings.warn(
-            "The 'start()' method is deprecated, please use 'add()' instead", DeprecationWarning
-        )
+            "The 'start()' method is deprecated, please use 'add()' instead",
+            DeprecationWarning)
         return self.add(*args, **kwargs)
 
     def stop(self, *args, **kwargs):
@@ -2093,6 +2151,6 @@ class Logger:
           confusing name.
         """
         warnings.warn(
-            "The 'stop()' method is deprecated, please use 'remove()' instead", DeprecationWarning
-        )
+            "The 'stop()' method is deprecated, please use 'remove()' instead",
+            DeprecationWarning)
         return self.remove(*args, **kwargs)
